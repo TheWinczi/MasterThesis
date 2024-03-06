@@ -1,6 +1,7 @@
 import os, glob
 import random
 from itertools import compress
+from os.path import join, exists
 
 import numpy as np
 from torch.utils import data
@@ -14,6 +15,9 @@ from . import memory_dataset as memd
 from .dataset_config import dataset_config
 from .autoaugment import CIFAR10Policy, ImageNetPolicy
 from .ops import Cutout
+
+from medmnist import PathMNIST, OrganAMNIST, TissueMNIST, BloodMNIST
+import kaggle
 
 
 def get_loaders(datasets, num_tasks, nc_first_task, batch_size, num_workers, pin_memory, validation=.1,
@@ -74,7 +78,7 @@ def get_datasets(dataset, path, num_tasks, nc_first_task, validation, trn_transf
 
     trn_dset, val_dset, tst_dset = [], [], []
 
-    if 'mnist' in dataset:
+    if 'mnist' == dataset:
         tvmnist_trn = TorchVisionMNIST(path, train=True, download=True)
         tvmnist_tst = TorchVisionMNIST(path, train=False, download=True)
         trn_data = {'x': tvmnist_trn.data.numpy(), 'y': tvmnist_trn.targets.tolist()}
@@ -155,6 +159,63 @@ def get_datasets(dataset, path, num_tasks, nc_first_task, validation, trn_transf
         all_data, taskcla, class_indices = basedat.get_data(path, num_tasks=num_tasks, nc_first_task=nc_first_task,
                                                                 validation=validation, shuffle_classes=False)
         Dataset = basedat.BaseDataset
+
+    elif dataset in ('pathmnist', 'organamnist', 'tissuemnist', 'bloodmnist'):
+        def raise_(ex: Exception):
+            raise ex
+
+        constructors = {
+            'pathmnist': PathMNIST,
+            'organamnist': OrganAMNIST,
+            'tissuemnist': TissueMNIST,
+            'bloodmnist': BloodMNIST
+        }
+
+        ds_constructor = constructors.get(
+            dataset.lower(),
+            lambda **kwargs: raise_(Exception(f'Dataset with name "{dataset}" not found'))
+        )
+
+        ds_train_data = ds_constructor(root=path, split="train", download=True, as_rgb=True)
+        ds_test_data = ds_constructor(root=path, split="test", download=True, as_rgb=True)
+        train_data = {'x': ds_train_data.imgs, 'y': ds_train_data.labels.flatten().tolist()}
+        test_data = {'x': ds_test_data.imgs, 'y': ds_test_data.labels.flatten().tolist()}
+        # compute splits
+        all_data, taskcla, class_indices = memd.get_data(train_data, test_data, validation=validation,
+                                                         num_tasks=num_tasks, nc_first_task=nc_first_task,
+                                                         shuffle_classes=class_order is None, class_order=class_order)
+        # set dataset type
+        Dataset = memd.MemoryDataset
+
+    elif dataset in ('skin7', 'skin8'):
+        TRAINING_FILE_NAME = 'training.npz'
+        TESTING_FILE_NAME = 'test.npz'
+        DATASET_NAME = f'michabajet/PGCL-{dataset.upper()}'
+
+        if (not exists(join(path, TRAINING_FILE_NAME))) or (not exists(join(path, TESTING_FILE_NAME))):
+            print(f"Dataset: {dataset} not found locally. Downloading...")
+            kaggle.api.dataset_download_files(DATASET_NAME, path=path, unzip=True, quiet=False)
+        else:
+            print(f"Dataset: {dataset} found in {join(path)}")
+
+        training_data_npz = np.load(join(path, TRAINING_FILE_NAME), allow_pickle=True, mmap_mode='r')
+        test_data_npz = np.load(join(path, TESTING_FILE_NAME), allow_pickle=True, mmap_mode='r')
+        print("NPZ files loaded. Extracting training data")
+        x_train = training_data_npz['x']
+        print("Extracting training target")
+        y_train = training_data_npz['y'].flatten().tolist()
+        print("Extracting test data")
+        x_test = test_data_npz['x']
+        print("Exctracting test target")
+        y_test = test_data_npz['y'].flatten().tolist()
+
+        train_data = {'x': x_train, 'y': y_train}
+        test_data = {'x': x_test, 'y': y_test}
+
+        all_data, taskcla, class_indices = memd.get_data(train_data, test_data, validation=validation,
+                                                         num_tasks=num_tasks, nc_first_task=nc_first_task,
+                                                         shuffle_classes=class_order is None, class_order=class_order)
+        Dataset = memd.MemoryDataset
 
     # get datasets, apply correct label offsets for each task
     offset = 0

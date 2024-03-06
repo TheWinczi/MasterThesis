@@ -127,6 +127,54 @@ dataset_config = {
         'crop': 224,
         'flip': True,
         'normalize': ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    },
+    'pathmnist': {
+        'path': join(_BASE_DATA_PATH, 'pathmnist'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': None
+    },
+    'organamnist': {
+        'path': join(_BASE_DATA_PATH, 'organamnist'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': None
+    },
+    'bloodmnist': {
+        'path': join(_BASE_DATA_PATH, 'bloodmnist'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': None
+    },
+    'tissuemnist': {
+        'path': join(_BASE_DATA_PATH, 'tissuemnist'),
+        'resize': None,
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': None
+    },
+    'skin7': {
+        'path': join(_BASE_DATA_PATH, 'skin7'),
+        'resize': (224, 224),
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': None
+    },
+    'skin8': {
+        'path': join(_BASE_DATA_PATH, 'skin8'),
+        'resize': (224, 224),
+        'pad': 4,
+        'crop': 32,
+        'flip': True,
+        'normalize': None
     }
 }
 
