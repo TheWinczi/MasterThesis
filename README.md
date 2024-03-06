@@ -3,7 +3,7 @@
 https://arxiv.org/abs/2401.10191  
 https://openreview.net/forum?id=sSyytcewxe  
 
-![image](inference.jpg?raw=true "inference")
+![image](.github/inference.jpg?raw=true "inference")
 
 This repository contains code for the SEED paper published at the main track of ICLR2024. It is based on FACIL (https://github.com/mmasana/FACIL) benchmark.
 To reproduce results run one of provided scripts. 
