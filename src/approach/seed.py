@@ -374,7 +374,7 @@ class Appr(Inc_Learning_Appr):
 
     def criterion(self, t, outputs, targets, features=None, old_features=None):
         """Returns the loss value"""
-        ce_loss = nn.functional.cross_entropy(outputs, targets, label_smoothing=0.0)
+        ce_loss = nn.functional.cross_entropy(outputs, targets)
         if old_features is not None:  # Knowledge distillation loss on features
             kd_loss = nn.functional.mse_loss(features, old_features)
             total_loss = (1 - self.alpha) * ce_loss + self.alpha * kd_loss
