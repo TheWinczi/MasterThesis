@@ -8,10 +8,9 @@ NETWORK="resnet18"
 TAU=3
 MAX_EXPERTS=1
 GMMS=1
-DATASET="cifar100"
+DATASET="skin8"
 NEPOCHS=200
 NUM_WORKERS=4
-NUM_TASKS=10
 
 GPU=1
 SEED=0
@@ -36,6 +35,6 @@ for LR in ${LRs[@]}; do
             "dataset = $DATASET," \
             "lr = $LR," \
             "alpha = $ALPHA"
-        python src/main_incremental.py --approach seed --gmms $GMMS --max-experts $MAX_EXPERTS --use-multivariate --nepochs $NEPOCHS --gpu $GPU --tau $TAU --batch-size $BATCH_SIZE --num-workers $NUM_WORKERS --datasets $DATASET --num-tasks $NUM_TASKS --lr $LR --weight-decay $WEIGHT_DEACAY --alpha $ALPHA --use-test-as-val --network $NETWORK --momentum $MOMENTUM --exp-name $EXP_NAME --seed $SEED
+        python src/main_incremental.py --approach seed --gmms $GMMS --max-experts $MAX_EXPERTS --use-multivariate --nepochs $NEPOCHS --gpu $GPU --tau $TAU --batch-size $BATCH_SIZE --num-workers $NUM_WORKERS --datasets $DATASET --lr $LR --weight-decay $WEIGHT_DEACAY --alpha $ALPHA --use-test-as-val --network $NETWORK --momentum $MOMENTUM --exp-name $EXP_NAME --seed $SEED
     done
 done
