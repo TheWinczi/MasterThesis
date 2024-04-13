@@ -1,11 +1,9 @@
 import copy
-import random
 import torch
 
 from argparse import ArgumentParser
 from itertools import compress
 from torch import nn
-from torch.utils.data import Dataset
 from torch.distributions import MultivariateNormal
 
 from .mvgb import ClassMemoryDataset, ClassDirectoryDataset
@@ -19,17 +17,16 @@ def softmax_temperature(x, dim, tau=1.0):
     return torch.softmax(x / tau, dim=dim)
 
 
-
 class Appr(Inc_Learning_Appr):
     """Class implementing the joint baseline"""
 
     def __init__(self, model, device, nepochs=200, ftepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, ftwd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, patience=5, fix_bn=False, eval_on_train=False,
                  logger=None, max_experts=999, gmms=1, alpha=1.0, tau=3.0, shared=0, use_multivariate=False, use_nmc=False,
-                 initialization_strategy="first", compensate_drifts=False):
+                 initialization_strategy="first", compensate_drifts=False, exemplars_dataset=None):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
-                                   exemplars_dataset=None)
+                                   exemplars_dataset=exemplars_dataset)
         self.max_experts = max_experts
         self.model.bbs = self.model.bbs[:max_experts]
         self.gmms = gmms
@@ -79,7 +76,7 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--ftepochs',
                             help='Number of epochs for finetuning an expert',
                             type=int,
-                            default=100)
+                            default=200)
         parser.add_argument('--ftwd',
                             help='Weight decay for finetuning',
                             type=float,
@@ -127,6 +124,7 @@ class Appr(Inc_Learning_Appr):
             self.model.bbs.append(copy.deepcopy(self.model.bbs[0]))
         model = self.model.bbs[t]
         model.fc = nn.Linear(self.model.num_features, self.model.taskcla[t][1])
+
         if t == 0:
             for param in model.parameters():
                 param.requires_grad = True
@@ -222,7 +220,7 @@ class Appr(Inc_Learning_Appr):
         print(f'The expert has {sum(p.numel() for p in model.parameters() if p.requires_grad):,} trainable parameters')
         print(f'The expert has {sum(p.numel() for p in model.parameters() if not p.requires_grad):,} shared parameters\n')
 
-        optimizer, lr_scheduler = self._get_optimizer(bb_to_finetune, wd=self.ftwd, milestones=[30, 60, 80])
+        optimizer, lr_scheduler = self._get_optimizer(bb_to_finetune, wd=self.ftwd)
         for epoch in range(self.ftepochs):
             train_loss, valid_loss = [], []
             train_hits, val_hits = 0, 0
@@ -381,8 +379,16 @@ class Appr(Inc_Learning_Appr):
             return total_loss
         return ce_loss
 
-    def _get_optimizer(self, num, wd, milestones=[60, 120, 160]):
+    def _get_optimizer(self, num, wd, milestones=[100, 160]):
         """Returns the optimizer"""
         optimizer = torch.optim.SGD(self.model.bbs[num].parameters(), lr=self.lr, weight_decay=wd, momentum=0.9)
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=optimizer, milestones=milestones, gamma=0.1)
         return optimizer, scheduler
+
+    @staticmethod
+    def exemplars_dataset_class():
+        """Returns a exemplar dataset to use during the training if the approach needs it
+        :return: ExemplarDataset class or None
+        """
+        from datasets.exemplars_dataset import ExemplarsDataset
+        return ExemplarsDataset
