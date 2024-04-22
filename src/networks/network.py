@@ -102,22 +102,23 @@ class LLL_Net(nn.Module):
 
 class ExtractorEnsemble(LLL_Net):
 
-    def __init__(self, backbone, taskcla, network_type, device):
+    def __init__(self, backbone, taskcla, network_type, device, pretrained: bool = False):
         super().__init__(backbone, taskcla, remove_existing_head=False)
         self.model = None
+        self.pretrained = pretrained
         self.num_features = 64
         self.network_type = network_type
         if network_type == "resnet18":
-            self.bb_fun = resnet18
+            self.model_constructor = resnet18
         elif network_type == "resnet34":
-            self.bb_fun = resnet34
+            self.model_constructor = resnet34
         elif network_type == "resnet50":
-            self.bb_fun = resnet50
+            self.model_constructor = resnet50
         elif network_type == "resnet32":
-            self.bb_fun = resnet32
+            self.model_constructor = resnet32
         elif network_type == "resnet20":
             self.num_features = 24
-            self.bb_fun = resnet20
+            self.model_constructor = resnet20
         else:
             raise RuntimeError("Network not supported")
 
@@ -146,3 +147,11 @@ class ExtractorEnsemble(LLL_Net):
     def freeze_backbone(self):
         """Freeze all parameters from the main model, but not the heads"""
         pass
+
+    def bb_fun(self, *args, **kwargs):
+        print(f'Calling bb_fun; pretrained variable = {self.pretrained}')
+        return self.model_constructor(
+            *args,
+            **kwargs,
+            pretrained=self.pretrained
+        )

@@ -3,6 +3,8 @@ from torch import Tensor
 import torch.nn as nn
 from typing import Type, Any, Callable, Union, List, Optional
 
+from torchvision.models.utils import load_state_dict_from_url
+
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
            'resnet152']
@@ -343,6 +345,17 @@ def _resnet(
     **kwargs: Any
 ) -> ResNet:
     model = ResNet(block, last_block, layers, **kwargs)
+    if pretrained:
+        state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
+
+        # Delete pretrained layers which size
+        # does not fit to created model
+        del state_dict['fc.weight']
+        del state_dict['fc.bias']
+
+        # Omit warning and errors linked to bottleneck and fc layers
+        # which are not present in original model (strict=False)
+        model.load_state_dict(state_dict, strict=False)
     return model
 
 

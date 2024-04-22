@@ -17,13 +17,14 @@ def softmax_temperature(x, dim, tau=1.0):
     return torch.softmax(x / tau, dim=dim)
 
 
+
 class Appr(Inc_Learning_Appr):
     """Class implementing the joint baseline"""
 
     def __init__(self, model, device, nepochs=200, ftepochs=100, lr=0.05, lr_min=1e-4, lr_factor=3, lr_patience=5, clipgrad=10000,
                  momentum=0, wd=0, ftwd=0, multi_softmax=False, wu_nepochs=0, wu_lr_factor=1, patience=5, fix_bn=False, eval_on_train=False,
                  logger=None, max_experts=999, gmms=1, alpha=1.0, tau=3.0, shared=0, use_multivariate=False, use_nmc=False,
-                 initialization_strategy="first", compensate_drifts=False, exemplars_dataset=None):
+                 initialization_strategy="first", compensate_drifts=False, skip_ft_pretraining=False, exemplars_dataset=None):
         super(Appr, self).__init__(model, device, nepochs, lr, lr_min, lr_factor, lr_patience, clipgrad, momentum, wd,
                                    multi_softmax, wu_nepochs, wu_lr_factor, fix_bn, eval_on_train, logger,
                                    exemplars_dataset=exemplars_dataset)
@@ -38,6 +39,7 @@ class Appr(Inc_Learning_Appr):
         self.ftepochs = ftepochs
         self.ftwd = ftwd
         self.compensate_drifts = compensate_drifts
+        self.skip_ft_pretraining = skip_ft_pretraining
         self.model.to(device)
         self.experts_distributions = []
         self.shared_layers = []
@@ -101,21 +103,42 @@ class Appr(Inc_Learning_Appr):
                             help='Drift compensation using MLP feature adaptation',
                             action='store_true',
                             default=False)
+        parser.add_argument('--skip-ft-pretraining',
+                            help='Skip pretraining on the first task',
+                            action='store_true',
+                            default=False)
         return parser.parse_known_args(args)
 
     def train_loop(self, t, trn_loader, val_loader):
-        if t < self.max_experts:
+        print(f'Skip first task pretraining = {self.skip_ft_pretraining}')
+
+        if (not self.skip_ft_pretraining) and (t < self.max_experts):
             print(f"Training backbone on task {t}:")
             self.train_backbone(t, trn_loader, val_loader)
             self.experts_distributions.append([])
-
-        if t >= self.max_experts:
-            bb_to_finetune = self._choose_backbone_to_finetune(t, trn_loader, val_loader)
+        else:
+            if t == 0:
+                self.handle_first_task()
+                bb_to_finetune = 0
+            else:
+                bb_to_finetune = self._choose_backbone_to_finetune(t, trn_loader, val_loader)
             print(f"Finetuning backbone {bb_to_finetune} on task {t}:")
             self.finetune_backbone(t, bb_to_finetune, trn_loader, val_loader)
 
         print(f"Creating distributions for task {t}:")
         self.create_distributions(t, trn_loader, val_loader)
+
+    def handle_first_task(self, t: int = 0):
+        self.model.bbs.append(self.model.bb_fun(num_classes=self.model.taskcla[t][1], num_features=self.model.num_features))
+        model = self.model.bbs[t]
+
+        for param in model.parameters():
+            param.requires_grad = True
+
+        model.to(self.device)
+
+        model.fc = nn.Identity()
+        self.model.bbs[t] = model
 
     def train_backbone(self, t, trn_loader, val_loader):
         if self.initialization_strategy == "random" or t==0:
