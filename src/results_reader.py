@@ -165,63 +165,45 @@ class ResultsFilesFinder:
         return files
 
 
-def calculate_intransigence(result: pd.DataFrame) -> float:
-    last_task_results = result[result.columns[-1]].to_numpy()[:-1]
-    after_task_results = np.diag(result)[:-1]
-    return (after_task_results - last_task_results).mean()
+class Metric:
+    @staticmethod
+    def intransigence(result: pd.DataFrame) -> float:
+        last_task_results = result[result.columns[-1]].to_numpy()[:-1]
+        after_task_results = np.diag(result)[:-1]
+        return (after_task_results - last_task_results).mean()
+
+    @staticmethod
+    def avg_inc_accuracy(results: pd.DataFrame) -> float:
+        num_tasks = len(results.columns)
+        avgs = np.array([
+            results[f'task{task+1}'].to_numpy()[:task+1].mean() 
+            for task in range(num_tasks)
+        ])
+        return avgs.mean()
+
+    @staticmethod
+    def avg_inc_forg(results: pd.DataFrame) -> float:
+        num_tasks = len(results.columns)
+        forgs = np.array([
+            results[f'task{task+1}'].to_numpy()[:task+1].mean()
+            for task in range(num_tasks)
+        ])
+        return forgs.mean()
 
 
-def calculate_avg_inc_accuracy(results: pd.DataFrame) -> float:
-    num_tasks = len(results.columns)
-    avgs = np.array([
-        results[f'task{task+1}'].to_numpy()[:task+1].mean() 
-        for task in range(num_tasks)
-    ])
-    return avgs.mean()
-
-
-def calculate_avg_inc_forg(results: pd.DataFrame) -> float:
-    num_tasks = len(results.columns)
-    forgs = np.array([
-        results[f'task{task+1}'].to_numpy()[:task+1].mean()
-        for task in range(num_tasks)
-    ])
-    return forgs.mean()
-
-
-def plot_grid_search_results(results_subdir: str):
-    base_path = os.path.join('..', '..', 'results', 'gridsearch')
-    results_path_seed_0 = os.path.join(base_path, results_subdir, 'seed_0')
-    results_path_seed_1 = os.path.join(base_path, results_subdir, 'seed_1')
-    results_path_seed_2 = os.path.join(base_path, results_subdir, 'seed_2')
-
-    experiments = {
-        'skin7': ResultsReader(7, 4),
-        'skin8': ResultsReader(8, 4),
-        'pathmnist': ResultsReader(9, 4),
-        'organamnist': ResultsReader(11, 4),
-        'cifar100': ResultsReader(100, 10)
-    }
-
-    for ds_sets in (('cifar100',), ('skin7', 'skin8'), ('organamnist', 'pathmnist')):
+def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths: list[os.PathLike], datasets_sets: tuple[tuple[str]]):   
+    for ds_sets in datasets_sets:
         fig, axs = plt.subplots(nrows=1, ncols=len(ds_sets), figsize=(8*len(ds_sets), 6))
         for ds_idx, dataset in enumerate(ds_sets):
-            results, alphas = defaultdict(list), set()
-            ds_reader = experiments[dataset]
             axis = axs if len(ds_sets) == 1 else axs[ds_idx]
-            finders = (
-                ResultsFilesFinder(dataset, results_path_seed_0),
-                ResultsFilesFinder(dataset, results_path_seed_1),
-                ResultsFilesFinder(dataset, results_path_seed_2)
-            )
-
-            for finder in finders:
+            results, alphas = defaultdict(list), set()
+            for finder in (ResultsFilesFinder(dataset, path) for path in result_paths):
                 for results_file, args_file in finder.find():
-                    exp_results = ds_reader.read(results_path=results_file, args_path=args_file)
+                    exp_results = experiments[dataset].read(results_path=results_file, args_path=args_file)
                     results[exp_results.args['lr']].append(GridSearchResult(
-                        acc=calculate_avg_inc_accuracy(exp_results.tag_acc),
-                        forg=calculate_avg_inc_forg(exp_results.tag_forg),
-                        intr=calculate_intransigence(exp_results.tag_acc),
+                        acc=Metric.avg_inc_accuracy(exp_results.tag_acc),
+                        forg=Metric.avg_inc_forg(exp_results.tag_forg),
+                        intr=Metric.intransigence(exp_results.tag_acc),
                         alpha=exp_results.args['alpha'],
                         lr=exp_results.args['lr'],
                         acc_std=0
@@ -240,23 +222,68 @@ def plot_grid_search_results(results_subdir: str):
                             acc=np.mean(accs), acc_std=np.std(accs)
                     ))
                 results[lr] = combined_results
-
+            
             xs = list(range(len(alphas)))
-            markers = ('o', 'x', 's', 'D')
+            markers = ('o', 'x', 's', 'D', '*')
+            acc_best, lr_best, alpha_best = 0, 0, 0
             for (lr, res), marker in zip(results.items(), markers):
                 accs = list(map(lambda r: r.acc, res))
                 accs_stds = list(map(lambda r: r.acc_std, res))
                 axis.errorbar(xs, accs, yerr=accs_stds, fmt=f'-.{marker}', capsize=5, label=f'lr={lr}')
-
+                
+                acc_max = max(accs)
+                if acc_max > acc_best:
+                    acc_best, lr_best = acc_max, lr
+                    alpha_best = list(filter(lambda r: r.acc == acc_best, res))[0].alpha
+            
             axis.legend()
             axis.set_xticks(xs, alphas)
             axis.set_title(finder.dataset.capitalize())
             axis.set_ylabel('Średnia skuteczność [%]')
             axis.set_xlabel('Alfa')
+            
+            print(20*'=', dataset.capitalize(), f'(lr={lr_best}, alpha={alpha_best}, acc={acc_best:.5f})', 20*'=')
+            
+            res_df = pd.DataFrame()
+            for lr, res in results.items():
+                res_df[f'{lr}'] = list(map(lambda r: r.acc, res))
+                res_df[f'{lr}_std'] = list(map(lambda r: r.acc_std, res))
+            res_df.index = alphas
+            
+            print(res_df, '\n')
+            
         plt.tight_layout()
         plt.show()
 
 
 if __name__ == '__main__':
-    plot_grid_search_results(results_subdir='imagenet_pretrained')
-    plot_grid_search_results(results_subdir='first_task_pretraining')
+    base_path = os.path.join('..', '..', 'results', 'gridsearch')
+    no_measures = 3
+
+    experiments = {
+        'skin7': ResultsReader(7, 4),
+        'skin8': ResultsReader(8, 4),
+        'pathmnist': ResultsReader(9, 4),
+        'organamnist': ResultsReader(11, 4),
+        'cifar100': ResultsReader(100, 10)
+    }
+
+    ds_sets = (
+        ('cifar100',), 
+        ('skin7', 'skin8'), 
+        ('organamnist', 'pathmnist')
+    )
+
+    print(25*'*', 'ImageNet Pretrained', 25*'*', '\n')
+    plot_grid_search_results(
+        experiments=experiments,
+        result_paths=[os.path.join(base_path, 'imagenet_pretrained', f'seed_{i}') for i in range(no_measures)], 
+        datasets_sets=ds_sets
+    )
+
+    print(25*'*', 'First Task Pretrained', 25*'*', '\n')
+    plot_grid_search_results(
+        experiments=experiments, 
+        result_paths=[os.path.join(base_path, 'first_task_pretraining', f'seed_{i}') for i in range(no_measures)],
+        datasets_sets=ds_sets
+    )
