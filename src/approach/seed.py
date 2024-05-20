@@ -86,7 +86,7 @@ class Appr(Inc_Learning_Appr):
         parser.add_argument('--use-multivariate',
                             help='Use multivariate distribution',
                             action='store_true',
-                            default=True)
+                            default=False)
         parser.add_argument('--use-nmc',
                             help='Use nearest mean classifier instead of bayes',
                             action='store_true',
@@ -111,6 +111,7 @@ class Appr(Inc_Learning_Appr):
 
     def train_loop(self, t, trn_loader, val_loader):
         print(f'Skip first task pretraining = {self.skip_ft_pretraining}')
+        print(f'Use multivariate = {self.use_multivariate} | Use NMC = {self.use_nmc}')
 
         if (not self.skip_ft_pretraining) and (t < self.max_experts):
             print(f"Training backbone on task {t}:")
