@@ -206,6 +206,7 @@ class Metric:
 
 
 def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths: list[os.PathLike], datasets_sets: tuple[tuple[str]]):   
+    lr_order = (0.1, 0.05, 0.01, 0.005, 0.001)
     ds_names_mapper = {
         'cifar100': 'CIFAR-100',
         'skin7': 'SKIN7',
@@ -249,7 +250,8 @@ def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths
             markers = ('o', 'x', 's', 'D', 'h')
             line_styles = cycle(('-', '--', '-.', ':'))
             acc_best, lr_best, alpha_best = 0, 0, 0
-            for (lr, res), marker, line_style in zip(results.items(), markers, line_styles):
+            for lr, marker, line_style in zip(lr_order, markers, line_styles):
+                res = results[lr]
                 accs = list(map(lambda r: r.acc, res))
                 accs_stds = list(map(lambda r: r.acc_std, res))
                 axis.errorbar(xs, accs, yerr=accs_stds, fmt=f'-.{marker}', capsize=5, label=f'lr={lr}', ls=line_style)
@@ -312,12 +314,11 @@ def plot_ft_gridsearch_results(experiments: dict[str, ResultsReader], result_pat
                 )]
             
             lr_order = (0.1, 0.05, 0.01, 0.005, 0.001)
-            colors = ('purple', 'red', 'green', 'orange', 'blue')
             width = 0.25
-            for x, (lr, color) in enumerate(zip(lr_order, colors)):
+            for x, lr in enumerate(lr_order):
                 lr_result = results[lr]
                 lr_result = lr_result[0] if len(lr_result) > 0 else FinetuningGridSearchResult(lr=lr, acc=1, acc_std=1, forg=0, intr=0)
-                axis.bar(x, lr_result.acc, width, yerr=lr_result.acc_std, capsize=5, label=str(lr), color=color)
+                axis.bar(x, lr_result.acc, width, yerr=lr_result.acc_std, capsize=5, label=str(lr))
             
             axis.set_xticks(list(range(len(lr_order))), lr_order)
             axis.set_title(ds_names_mapper[finder.dataset])
