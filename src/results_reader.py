@@ -1,5 +1,6 @@
 from typing import Iterable, Optional, NamedTuple
 from collections import defaultdict
+from itertools import cycle
 import pathlib
 import os
 import json
@@ -27,6 +28,19 @@ class ResultsFiles(NamedTuple):
 class GridSearchResult(NamedTuple):
     alpha: float
     lr: float
+    acc: float
+    acc_std: float
+    forg: float
+    intr: float
+
+class FinetuningGridSearchResult(NamedTuple):
+    lr: float
+    acc: float
+    acc_std: float
+    forg: float
+    intr: float
+
+class CovMatrixResults(NamedTuple):
     acc: float
     acc_std: float
     forg: float
@@ -192,6 +206,14 @@ class Metric:
 
 
 def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths: list[os.PathLike], datasets_sets: tuple[tuple[str]]):   
+    ds_names_mapper = {
+        'cifar100': 'CIFAR-100',
+        'skin7': 'SKIN7',
+        'skin8': 'SKIN8',
+        'pathmnist': 'PathMNIST',
+        'organamnist': 'OrganAMNIST'
+    }
+    
     for ds_sets in datasets_sets:
         fig, axs = plt.subplots(nrows=1, ncols=len(ds_sets), figsize=(8*len(ds_sets), 6))
         for ds_idx, dataset in enumerate(ds_sets):
@@ -224,12 +246,13 @@ def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths
                 results[lr] = combined_results
             
             xs = list(range(len(alphas)))
-            markers = ('o', 'x', 's', 'D', '*')
+            markers = ('o', 'x', 's', 'D', 'h')
+            line_styles = cycle(('-', '--', '-.', ':'))
             acc_best, lr_best, alpha_best = 0, 0, 0
-            for (lr, res), marker in zip(results.items(), markers):
+            for (lr, res), marker, line_style in zip(results.items(), markers, line_styles):
                 accs = list(map(lambda r: r.acc, res))
                 accs_stds = list(map(lambda r: r.acc_std, res))
-                axis.errorbar(xs, accs, yerr=accs_stds, fmt=f'-.{marker}', capsize=5, label=f'lr={lr}')
+                axis.errorbar(xs, accs, yerr=accs_stds, fmt=f'-.{marker}', capsize=5, label=f'lr={lr}', ls=line_style)
                 
                 acc_max = max(accs)
                 if acc_max > acc_best:
@@ -238,8 +261,8 @@ def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths
             
             axis.legend()
             axis.set_xticks(xs, alphas)
-            axis.set_title(finder.dataset.capitalize())
-            axis.set_ylabel('Średnia skuteczność [%]')
+            axis.set_title(ds_names_mapper[finder.dataset])
+            axis.set_ylabel('Średnia dokładność [%]')
             axis.set_xlabel('Alfa')
             
             print(20*'=', dataset.capitalize(), f'(lr={lr_best}, alpha={alpha_best}, acc={acc_best:.5f})', 20*'=')
@@ -254,10 +277,161 @@ def plot_grid_search_results(experiments: dict[str, ResultsReader], result_paths
             
         plt.tight_layout()
         plt.show()
+        
+def plot_ft_gridsearch_results(experiments: dict[str, ResultsReader], result_paths: list[os.PathLike], datasets_sets: tuple[tuple[str]]):   
+    ds_names_mapper = {
+        'cifar100': 'CIFAR-100',
+        'skin7': 'SKIN7',
+        'skin8': 'SKIN8',
+        'pathmnist': 'PathMNIST',
+        'organamnist': 'OrganAMNIST'
+    }
+    
+    for ds_sets in datasets_sets:
+        fig, axs = plt.subplots(nrows=1, ncols=len(ds_sets), figsize=(8*len(ds_sets), 6))
+        for ds_idx, dataset in enumerate(ds_sets):
+            axis = axs if len(ds_sets) == 1 else axs[ds_idx]
+            results = defaultdict(list)
+            for finder in (ResultsFilesFinder(dataset, path) for path in result_paths):
+                for results_file, args_file in finder.find():
+                    exp_results = experiments[dataset].read(results_path=results_file, args_path=args_file)
+                    results[exp_results.args['lr']].append(FinetuningGridSearchResult(
+                        acc=Metric.avg_inc_accuracy(exp_results.tag_acc),
+                        forg=Metric.avg_inc_forg(exp_results.tag_forg),
+                        intr=Metric.intransigence(exp_results.tag_acc),
+                        lr=exp_results.args['lr'],
+                        acc_std=0
+                    ))
+            
+            for lr in results.keys():
+                accs = list(map(lambda r: r.acc, results[lr]))
+                results[lr] = [
+                    FinetuningGridSearchResult(
+                        lr=lr, forg=0, intr=0,
+                        acc=np.mean(accs), acc_std=np.std(accs)
+                )]
+            
+            lr_order = (0.1, 0.05, 0.01, 0.005, 0.001)
+            colors = ('purple', 'red', 'green', 'orange', 'blue')
+            width = 0.25
+            for x, (lr, color) in enumerate(zip(lr_order, colors)):
+                lr_result = results[lr]
+                lr_result = lr_result[0] if len(lr_result) > 0 else FinetuningGridSearchResult(lr=lr, acc=1, acc_std=1, forg=0, intr=0)
+                axis.bar(x, lr_result.acc, width, yerr=lr_result.acc_std, capsize=5, label=str(lr), color=color)
+            
+            axis.set_xticks(list(range(len(lr_order))), lr_order)
+            axis.set_title(ds_names_mapper[finder.dataset])
+            axis.set_ylabel('Średnia dokładność [%]')
+            axis.set_xlabel('Współczynnik uczenia (LR)')
+            
+            print(20*'=', dataset.capitalize(), 20*'=')
+            
+            res_df = pd.DataFrame()
+            for lr, res in results.items():
+                res_df[f'{lr}'] = list(map(lambda r: r.acc, res))
+                res_df[f'{lr}_std'] = list(map(lambda r: r.acc_std, res))
+            print(res_df, '\n')
+            
+        plt.tight_layout()
+        plt.show()
+
+
+def plot_cov_matrix_results(experiments: dict[str, ResultsReader], result_paths: list[os.PathLike]):   
+    ds_names_mapper = {
+        'cifar100': 'CIFAR-100',
+        'skin7': 'SKIN7',
+        'skin8': 'SKIN8',
+        'pathmnist': 'PathMNIST',
+        'organamnist': 'OrganAMNIST'
+    }
+    
+    alg_name_mapper = {
+        'full': 'Pełna macierz',
+        'diag': 'Przekątna macierzy',
+        'nmc': 'Klasyfikator najbliższej średniej'
+    }
+    
+    def full_matrix_filter(path: str):
+        return 'full_cov_matrix' in path
+    
+    def matrix_diag_filter(path: str):
+        return 'diagonal_cov_matrix' in path
+    
+    def nmc_filter(path: str):
+        return 'nearest_mean_classifier' in path
+
+    results = {ds_name: defaultdict(list) for ds_name in ds_names_mapper.keys()}
+    
+    for dataset, _ in experiments.items():
+        for finder in (ResultsFilesFinder(dataset, path) for path in result_paths):
+            for results_file, args_file in finder.find():
+                exp_result = experiments[dataset].read(results_path=results_file, args_path=args_file)
+                
+                result_path = exp_result.results_file_path
+                alg_type = 'full' if full_matrix_filter(result_path) else 'diag' if matrix_diag_filter(result_path) else 'nmc' if nmc_filter(result_path) else None
+                
+                results[dataset][alg_type].append(CovMatrixResults(
+                    acc=Metric.avg_inc_accuracy(exp_result.tag_acc),
+                    forg=Metric.avg_inc_forg(exp_result.tag_forg),
+                    intr=Metric.intransigence(exp_result.tag_acc),
+                    acc_std=0
+                ))
+    
+    combined_results = {dataset: dict() for dataset in ds_names_mapper.keys()}
+    for dataset, ds_results in results.items():
+        for alg_type, alg_type_results in ds_results.items():
+            accs = list(map(lambda r: r.acc, alg_type_results))
+            combined_results[dataset][alg_type] = CovMatrixResults(
+                acc=np.mean(accs), acc_std=np.std(accs), forg=0, intr=0
+            )
+    
+    x = np.arange(len(combined_results.keys()))  # the label locations
+    width = 0.25  # the width of the bars
+    measures_keys = ('full', 'diag', 'nmc')
+    hatches = ('', 'XX', '..')
+    ds_order = ('cifar100', 'skin7', 'skin8', 'pathmnist', 'organamnist')
+    round_digit = 2
+
+    fig, ax = plt.subplots(layout='constrained')
+
+    for (i, alg), hatch in zip(enumerate(measures_keys), hatches):
+        accs = [
+            round(combined_results[dataset][alg].acc, round_digit)
+            for dataset in ds_order
+        ]
+        acc_stds = [
+            round(combined_results[dataset][alg].acc_std, round_digit)
+            for dataset in ds_order
+        ]
+        offset = width * (i+1)
+        rects = ax.bar(x + offset, accs, width, 
+                       yerr=acc_stds, 
+                       capsize=5, 
+                       label=alg_name_mapper[alg],
+                       hatch=hatch)
+        ax.bar_label(rects, padding=3)
+        
+    for dataset in ds_order:
+        print(10*'=', dataset, 10*'=')
+        for alg in measures_keys:
+            acc = round(combined_results[dataset][alg].acc, round_digit)
+            acc_std = round(combined_results[dataset][alg].acc_std, round_digit)
+            print(f'{alg}: acc={acc} +- {acc_std}')
+            
+
+    # Add some text for labels, title and custom x-axis tick labels, etc.
+    ax.set_ylabel('Średnia dokładność [%]')
+    ax.set_xlabel('Zbiór danych')
+    ax.set_title('Porównanie średnich dokładności wśród różnych zbiorów danych')
+    ax.set_xticks(x + width*2, [ds_names_mapper[ds_name] for ds_name in ds_order])
+    ax.legend()
+    
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == '__main__':
-    base_path = os.path.join('..', '..', 'results', 'gridsearch')
+    base_path = os.path.join('..', '..', 'results')
     no_measures = 3
 
     experiments = {
@@ -277,13 +451,33 @@ if __name__ == '__main__':
     print(25*'*', 'ImageNet Pretrained', 25*'*', '\n')
     plot_grid_search_results(
         experiments=experiments,
-        result_paths=[os.path.join(base_path, 'imagenet_pretrained', f'seed_{i}') for i in range(no_measures)], 
+        result_paths=[os.path.join(base_path, 'gridsearch', 'imagenet_pretrained', f'seed_{i}') for i in range(no_measures)], 
         datasets_sets=ds_sets
     )
 
     print(25*'*', 'First Task Pretrained', 25*'*', '\n')
     plot_grid_search_results(
         experiments=experiments, 
-        result_paths=[os.path.join(base_path, 'first_task_pretraining', f'seed_{i}') for i in range(no_measures)],
+        result_paths=[os.path.join(base_path, 'gridsearch', 'first_task_pretraining', f'seed_{i}') for i in range(no_measures)],
+        datasets_sets=ds_sets
+    )
+
+    print(25*'*', 'Covariance Matrix Algorithms', 25*'*', '\n')
+    plot_cov_matrix_results(
+        experiments=experiments,
+        result_paths=[os.path.join(base_path, 'cov_matrix', f'seed_{i}') for i in range(no_measures)]
+    )
+    
+    print(25*'*', 'ONLINE Gridsearch - ImageNet Pretrained - SEED', 25*'*', '\n')
+    plot_grid_search_results(
+        experiments=experiments,
+        result_paths=[os.path.join(base_path, 'online', 'seed', f'seed_{i}') for i in range(no_measures)], 
+        datasets_sets=ds_sets
+    )
+    
+    print(25*'*', 'ONLINE Gridsearch - ImageNet Pretrained - FINETUNING', 25*'*', '\n')
+    plot_ft_gridsearch_results(
+        experiments=experiments,
+        result_paths=[os.path.join(base_path, 'online', 'finetuning', f'seed_{i}') for i in range(no_measures)], 
         datasets_sets=ds_sets
     )
